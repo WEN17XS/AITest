@@ -57,7 +57,7 @@ GET /api/v1/auth/me
 
 角色说明：
 
-- `admin`：拥有审核权限。
+- `admin`：拥有审核权限和项目删除权限。
 - `reviewer`：拥有审核权限。
 - `tester`：可以创建、编辑和执行测试，但不能通过或驳回测试用例。
 
@@ -77,6 +77,14 @@ POST /api/v1/projects
   "default_branch": "main"
 }
 ```
+
+删除项目：
+
+```http
+DELETE /api/v1/projects/{project_id}
+```
+
+只有 `admin` 可以删除项目。删除项目会级联删除该项目下的需求、测试用例、运行记录、环境配置、知识条目和 CI 触发记录。
 
 ## 需求与用例生成
 

@@ -156,6 +156,8 @@ export const api = {
   listProjects: () => request<Project[]>('/projects'),
   createProject: (payload: Partial<Project>) =>
     request<Project>('/projects', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteProject: (projectId: number) =>
+    request<{ status: string }>(`/projects/${projectId}`, { method: 'DELETE' }),
 
   listEnvironments: (projectId: number) => request<ProjectEnvironment[]>(`/environments?project_id=${projectId}`),
   createEnvironment: (payload: Omit<ProjectEnvironment, 'id'>) =>

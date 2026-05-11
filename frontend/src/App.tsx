@@ -175,10 +175,10 @@ export function App() {
     setNotice('已退出登录。');
   }
 
-  async function refresh(projectId = selectedProjectId) {
+  async function refresh(projectId: number | null | undefined = selectedProjectId) {
     const nextProjects = await api.listProjects();
     setProjects(nextProjects);
-    const nextProjectId = projectId ?? nextProjects[0]?.id;
+    const nextProjectId = projectId === null ? nextProjects[0]?.id : projectId ?? nextProjects[0]?.id;
     setSelectedProjectId(nextProjectId);
     if (nextProjectId) {
       const [nextCases, nextRuns, nextEnvironments, nextKnowledge, nextCiTriggers] = await Promise.all([
@@ -199,6 +199,13 @@ export function App() {
           setSelectedRun(await api.getRun(updatedRun.id));
         }
       }
+    } else {
+      setCases([]);
+      setRuns([]);
+      setEnvironments([]);
+      setKnowledge([]);
+      setCiTriggers([]);
+      setSelectedRun(undefined);
     }
   }
 
@@ -214,6 +221,34 @@ export function App() {
       await refresh(project.id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : '创建项目失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteProject(project: Project) {
+    if (currentUser?.role !== 'admin') {
+      setNotice('当前账号没有项目删除权限。');
+      return;
+    }
+    const confirmed = window.confirm(`确认删除项目“${project.name}”？该项目下的需求、用例、运行记录、环境和知识都会一并删除。`);
+    if (!confirmed) return;
+    setLoading(true);
+    try {
+      await api.deleteProject(project.id);
+      setNotice(`已删除项目：${project.name}`);
+      if (project.id === selectedProjectId) {
+        setSelectedProjectId(undefined);
+        setCases([]);
+        setRuns([]);
+        setEnvironments([]);
+        setKnowledge([]);
+        setCiTriggers([]);
+        setSelectedRun(undefined);
+      }
+      await refresh(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '删除项目失败');
     } finally {
       setLoading(false);
     }
@@ -536,8 +571,23 @@ export function App() {
                 className={project.id === selectedProjectId ? 'project-item active' : 'project-item'}
                 onClick={() => refresh(project.id)}
               >
-                <strong>{project.name}</strong>
-                <span>{project.default_branch}</span>
+                <span>
+                  <strong>{project.name}</strong>
+                  <small>{project.default_branch}</small>
+                </span>
+                {user.role === 'admin' && (
+                  <span
+                    className="project-delete"
+                    role="button"
+                    title="删除项目"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      deleteProject(project);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </span>
+                )}
               </button>
             ))}
           </div>

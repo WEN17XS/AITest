@@ -345,11 +345,13 @@ textarea:focus {
 }
 
 .project-item {
+  align-items: center;
   background: #f7fafb;
   border: 1px solid #dce5e6;
   color: #172026;
   display: grid;
   gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 32px;
   padding: 12px;
   text-align: left;
 }
@@ -359,6 +361,13 @@ textarea:focus {
   border-color: #7fb8aa;
 }
 
+.project-item > span:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-item small,
 .project-item span,
 .actions span,
 .case-item p,
@@ -366,6 +375,18 @@ textarea:focus {
 .run-item p {
   color: #607177;
   font-size: 13px;
+}
+
+.project-delete {
+  align-items: center;
+  background: #ffe4e0;
+  border-radius: 6px;
+  color: #9b2d20;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  justify-self: end;
+  width: 30px;
 }
 
 .metric-grid {

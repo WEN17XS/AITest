@@ -66,6 +66,23 @@ AITestHub 的目标是给未来项目提供统一测试入口：
 - JMeter 或 Locust：性能测试
 - 自定义脚本执行器
 
+第二阶段执行器架构设计见 `docs/executor-architecture.md`。目标分层为：
+
+```text
+API / CI 入口
+  -> 运行编排层 TestExecutionService
+  -> 执行器注册表 ExecutorRegistry
+  -> 具体执行器 TestExecutor
+  -> 结果与附件持久化
+```
+
+关键约定：
+
+- `TestExecutionService` 只负责运行编排、状态更新、结果落库和报告聚合，不直接包含 Playwright 或 pytest 细节。
+- 具体执行器实现统一的 `TestExecutor` 接口，返回标准化 `ExecutionResult`。
+- 当前模拟执行器后续迁移为 `MockExecutor`，继续作为平台闭环兜底能力。
+- 第二阶段建议新增运行级执行器配置、环境引用和附件模型，用于承载截图、视频、trace、日志等真实执行产物。
+
 ### 数据库
 
 使用 PostgreSQL 存储业务数据，使用 pgvector 预留向量字段。

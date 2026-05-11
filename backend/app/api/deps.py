@@ -33,3 +33,9 @@ def require_reviewer(current_user: User = Depends(get_current_user)) -> User:
     if current_user.role not in {"admin", "reviewer"}:
         raise HTTPException(status_code=403, detail="当前账号没有审核权限")
     return current_user
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="当前账号没有项目管理权限")
+    return current_user
