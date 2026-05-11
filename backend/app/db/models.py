@@ -94,19 +94,24 @@ class TestRun(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    environment_id: Mapped[int | None] = mapped_column(ForeignKey("project_environments.id", ondelete="SET NULL"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     trigger_type: Mapped[str] = mapped_column(String(40), default="manual")
+    executor_type: Mapped[str] = mapped_column(String(40), default="mock")
+    executor_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(30), default="queued")
     branch: Mapped[str | None] = mapped_column(String(120))
     commit_sha: Mapped[str | None] = mapped_column(String(80))
     changed_files: Mapped[list[str]] = mapped_column(JSON, default=list)
     summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     report: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     results: Mapped[list["TestRunResult"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    artifacts: Mapped[list["TestRunArtifact"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     ci_trigger: Mapped["CiTrigger | None"] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
@@ -123,6 +128,25 @@ class TestRunResult(Base):
     artifacts: Mapped[list[str]] = mapped_column(JSON, default=list)
 
     run: Mapped[TestRun] = relationship(back_populates="results")
+    artifact_records: Mapped[list["TestRunArtifact"]] = relationship(back_populates="result")
+
+
+class TestRunArtifact(Base):
+    __tablename__ = "test_run_artifacts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False)
+    result_id: Mapped[int | None] = mapped_column(ForeignKey("test_run_results.id", ondelete="SET NULL"))
+    artifact_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    name: Mapped[str] = mapped_column(String(240), nullable=False)
+    path: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    run: Mapped[TestRun] = relationship(back_populates="artifacts")
+    result: Mapped[TestRunResult | None] = relationship(back_populates="artifact_records")
 
 
 class KnowledgeChunk(Base):

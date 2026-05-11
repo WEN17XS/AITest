@@ -57,7 +57,7 @@ const statusLabel: Record<string, string> = {
 
 const emptyCase: Partial<TestCase> = {
   title: '',
-  type: 'functional',
+  type: 'web_ui',
   priority: 'P2',
   preconditions: '',
   expected_result: '',
@@ -95,6 +95,10 @@ export function App() {
   const [knowledgeImportFile, setKnowledgeImportFile] = useState<File | undefined>();
   const [editingCaseId, setEditingCaseId] = useState<number | undefined>();
   const [draftCase, setDraftCase] = useState<Partial<TestCase>>(emptyCase);
+  const [runExecutorType, setRunExecutorType] = useState<'mock' | 'playwright'>('mock');
+  const [runEnvironmentId, setRunEnvironmentId] = useState<number | undefined>();
+  const [runHeadless, setRunHeadless] = useState(true);
+  const [runTimeoutMs, setRunTimeoutMs] = useState(10000);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -290,13 +294,13 @@ export function App() {
     setEditingCaseId(testCase.id);
     setDraftCase({
       ...testCase,
-      steps: testCase.steps.map((step, index) => ({ order: index + 1, action: step.action })),
+      steps: testCase.steps.map((step, index) => ({ ...step, order: step.order ?? index + 1 })),
     });
   }
 
   async function saveCase() {
     if (!editingCaseId || !selectedProjectId) return;
-    const steps = (draftCase.steps ?? []).filter((step) => step.action?.trim());
+    const steps = normalizeDraftSteps(draftCase.steps ?? []);
     await api.updateCase(editingCaseId, {
       title: draftCase.title,
       type: draftCase.type,
@@ -323,13 +327,26 @@ export function App() {
 
   async function runApprovedCases() {
     if (!selectedProjectId) return;
-    const approvedIds = cases.filter((item) => item.status === 'approved').map((item) => item.id);
+    const runnableCases = cases.filter((item) =>
+      item.status === 'approved' && (runExecutorType === 'playwright' ? item.type === 'web_ui' : true),
+    );
+    const approvedIds = runnableCases.map((item) => item.id);
+    if (!approvedIds.length) {
+      setNotice(runExecutorType === 'playwright' ? '没有已通过的 web_ui 用例可执行。' : '没有已通过的测试用例可执行。');
+      return;
+    }
     setLoading(true);
     try {
       const run = await api.createRun({
         project_id: selectedProjectId,
-        name: '人工触发回归测试',
+        environment_id: runEnvironmentId,
+        name: runExecutorType === 'playwright' ? '人工触发 Playwright Web UI 测试' : '人工触发回归测试',
         case_ids: approvedIds,
+        executor_type: runExecutorType,
+        executor_config:
+          runExecutorType === 'playwright'
+            ? { browser: 'chromium', headless: runHeadless, timeout_ms: runTimeoutMs, screenshot_on_failure: true }
+            : {},
       });
       setNotice(`测试任务已提交，运行 ID：${run.id}`);
       await refresh(selectedProjectId);
@@ -453,6 +470,16 @@ export function App() {
             openRunDetail={openRunDetail}
             loading={loading}
             selectedProjectId={selectedProjectId}
+            cases={cases}
+            environments={environments}
+            executorType={runExecutorType}
+            setExecutorType={setRunExecutorType}
+            environmentId={runEnvironmentId}
+            setEnvironmentId={setRunEnvironmentId}
+            headless={runHeadless}
+            setHeadless={setRunHeadless}
+            timeoutMs={runTimeoutMs}
+            setTimeoutMs={setRunTimeoutMs}
           />
         );
       case 'knowledge':
@@ -686,6 +713,34 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
+function normalizeDraftSteps(steps: TestCase['steps']) {
+  return steps
+    .map((step, index) => ({ ...step, order: step.order ?? index + 1, action: String(step.action ?? '').trim() }))
+    .filter((step) => step.action);
+}
+
+function formatStepsForEditor(steps: TestCase['steps']) {
+  return JSON.stringify(steps.map((step, index) => ({ ...step, order: step.order ?? index + 1 })), null, 2);
+}
+
+function parseStepsFromEditor(value: string): TestCase['steps'] {
+  const text = value.trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed.map((step, index) => ({
+        ...(typeof step === 'object' && step !== null ? step : { action: String(step) }),
+        order: Number(step?.order ?? index + 1),
+        action: String(step?.action ?? '').trim(),
+      }));
+    }
+  } catch {
+    // 非 JSON 时按旧的逐行文本步骤处理。
+  }
+  return value.split('\n').map((action, index) => ({ order: index + 1, action }));
+}
+
 function OverviewView({
   stats,
   cases,
@@ -805,8 +860,20 @@ function ReviewView({
               <div className="edit-form">
                 <input value={draftCase.title ?? ''} onChange={(event) => setDraftCase({ ...draftCase, title: event.target.value })} />
                 <div className="triple-row">
-                  <input value={draftCase.type ?? ''} onChange={(event) => setDraftCase({ ...draftCase, type: event.target.value })} />
-                  <input value={draftCase.priority ?? ''} onChange={(event) => setDraftCase({ ...draftCase, priority: event.target.value })} />
+                  <select value={draftCase.type ?? 'web_ui'} onChange={(event) => setDraftCase({ ...draftCase, type: event.target.value })}>
+                    <option value="web_ui">UI 自动化</option>
+                    <option value="api">接口/API</option>
+                    <option value="functional">功能</option>
+                    <option value="regression">回归</option>
+                    <option value="security">安全</option>
+                    <option value="manual">人工</option>
+                  </select>
+                  <select value={draftCase.priority ?? 'P2'} onChange={(event) => setDraftCase({ ...draftCase, priority: event.target.value })}>
+                    <option value="P0">P0</option>
+                    <option value="P1">P1</option>
+                    <option value="P2">P2</option>
+                    <option value="P3">P3</option>
+                  </select>
                   <input
                     value={(draftCase.tags ?? []).join(',')}
                     onChange={(event) => setDraftCase({ ...draftCase, tags: event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) })}
@@ -814,11 +881,12 @@ function ReviewView({
                 </div>
                 <textarea value={draftCase.preconditions ?? ''} onChange={(event) => setDraftCase({ ...draftCase, preconditions: event.target.value })} />
                 <textarea
-                  value={(draftCase.steps ?? []).map((step) => step.action).join('\n')}
+                  className="steps-editor"
+                  value={formatStepsForEditor(draftCase.steps ?? [])}
                   onChange={(event) =>
                     setDraftCase({
                       ...draftCase,
-                      steps: event.target.value.split('\n').map((action, index) => ({ order: index + 1, action })),
+                      steps: parseStepsFromEditor(event.target.value),
                     })
                   }
                 />
@@ -905,6 +973,16 @@ function RunsView({
   openRunDetail,
   loading,
   selectedProjectId,
+  cases,
+  environments,
+  executorType,
+  setExecutorType,
+  environmentId,
+  setEnvironmentId,
+  headless,
+  setHeadless,
+  timeoutMs,
+  setTimeoutMs,
 }: {
   runs: TestRun[];
   ciTriggers: CiTrigger[];
@@ -913,11 +991,71 @@ function RunsView({
   openRunDetail: (runId: number) => void;
   loading: boolean;
   selectedProjectId?: number;
+  cases: TestCase[];
+  environments: ProjectEnvironment[];
+  executorType: 'mock' | 'playwright';
+  setExecutorType: (value: 'mock' | 'playwright') => void;
+  environmentId?: number;
+  setEnvironmentId: (value?: number) => void;
+  headless: boolean;
+  setHeadless: (value: boolean) => void;
+  timeoutMs: number;
+  setTimeoutMs: (value: number) => void;
 }) {
+  const approvedCount = cases.filter((item) => item.status === 'approved').length;
+  const webUiApprovedCount = cases.filter((item) => item.status === 'approved' && item.type === 'web_ui').length;
+  const runnableCount = executorType === 'playwright' ? webUiApprovedCount : approvedCount;
+
   return (
     <div className="two-column">
       <section className="panel">
         <PanelTitle icon={Play} title="测试执行" />
+        <div className="run-config">
+          <div className="segmented-control">
+            <button className={executorType === 'mock' ? 'active' : ''} onClick={() => setExecutorType('mock')}>
+              模拟
+            </button>
+            <button className={executorType === 'playwright' ? 'active' : ''} onClick={() => setExecutorType('playwright')}>
+              Playwright
+            </button>
+          </div>
+          <label>
+            执行环境
+            <select
+              value={environmentId ?? ''}
+              onChange={(event) => setEnvironmentId(event.target.value ? Number(event.target.value) : undefined)}
+            >
+              <option value="">默认环境</option>
+              {environments.map((environment) => (
+                <option key={environment.id} value={environment.id}>
+                  {environment.name} · {environment.base_url}
+                </option>
+              ))}
+            </select>
+          </label>
+          {executorType === 'playwright' && (
+            <div className="executor-options">
+              <label className="checkbox-row">
+                <input type="checkbox" checked={headless} onChange={(event) => setHeadless(event.target.checked)} />
+                Headless
+              </label>
+              <label>
+                超时 ms
+                <input
+                  type="number"
+                  min={1000}
+                  step={1000}
+                  value={timeoutMs}
+                  onChange={(event) => setTimeoutMs(Number(event.target.value) || 10000)}
+                />
+              </label>
+            </div>
+          )}
+          <div className="run-config-summary">
+            <span>可执行用例</span>
+            <strong>{runnableCount}</strong>
+          </div>
+        </div>
         <button className="run-button" onClick={runApprovedCases} disabled={!selectedProjectId || loading}>
           <Play size={17} />
           执行已通过用例
@@ -930,7 +1068,7 @@ function RunsView({
                 <span className={`badge ${run.status}`}>{statusLabel[run.status] ?? run.status}</span>
               </div>
               <p>
-                总数 {run.summary?.total ?? 0}，通过 {run.summary?.passed ?? 0}，失败 {run.summary?.failed ?? 0}
+                {run.executor_type} · 总数 {run.summary?.total ?? 0}，通过 {run.summary?.passed ?? 0}，失败 {run.summary?.failed ?? 0}
               </p>
               <button className="ghost primary" onClick={() => openRunDetail(run.id)}>查看详情</button>
             </article>
@@ -957,9 +1095,12 @@ function RunsView({
               <Detail label="运行 ID" value={`#${selectedRun.id}`} />
               <Detail label="状态" value={statusLabel[selectedRun.status] ?? selectedRun.status} />
               <Detail label="触发方式" value={selectedRun.trigger_type} />
+              <Detail label="执行器" value={selectedRun.executor_type} />
+              <Detail label="环境" value={selectedRun.environment_id ? `#${selectedRun.environment_id}` : '默认'} />
               <Detail label="分支" value={selectedRun.branch ?? '-'} />
               <Detail label="提交" value={selectedRun.commit_sha ?? '-'} />
             </div>
+            {selectedRun.error_message && <div className="notice">{selectedRun.error_message}</div>}
             {selectedRun.report && <pre>{selectedRun.report}</pre>}
             <PanelTitle icon={ShieldCheck} title="用例结果" />
             <div className="mini-list">
@@ -967,10 +1108,25 @@ function RunsView({
                 <div className="knowledge-item" key={result.id}>
                   <strong>Case #{result.case_id ?? '-'} · {statusLabel[result.status] ?? result.status}</strong>
                   <p>{result.message}</p>
+                  {result.artifacts.length > 0 && <p>附件：{result.artifacts.join('、')}</p>}
                   {result.logs && <pre>{result.logs}</pre>}
                 </div>
               ))}
             </div>
+            {(selectedRun.artifacts ?? []).length > 0 && (
+              <>
+                <PanelTitle icon={FileText} title="执行附件" />
+                <div className="mini-list">
+                  {(selectedRun.artifacts ?? []).map((artifact) => (
+                    <div className="knowledge-item" key={artifact.id}>
+                      <strong>{artifact.artifact_type} · {artifact.name}</strong>
+                      <p>{artifact.path}</p>
+                      <p>{artifact.content_type ?? '未知类型'} · {artifact.size_bytes} bytes</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
             {selectedRun.ci_trigger && (
               <>
                 <PanelTitle icon={GitBranch} title="CI 触发详情" />

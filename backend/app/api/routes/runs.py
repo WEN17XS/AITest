@@ -14,8 +14,11 @@ router = APIRouter()
 def create_run(payload: RunCreate, db: Session = Depends(get_db), _user=Depends(get_current_user)) -> TestRun:
     run = TestRun(
         project_id=payload.project_id,
+        environment_id=payload.environment_id,
         name=payload.name,
         trigger_type=payload.trigger_type,
+        executor_type=payload.executor_type,
+        executor_config=payload.executor_config,
         branch=payload.branch,
         commit_sha=payload.commit_sha,
         changed_files=payload.changed_files,
@@ -44,7 +47,7 @@ def list_runs(
 def get_run(run_id: int, db: Session = Depends(get_db), _user=Depends(get_current_user)) -> TestRun:
     run = (
         db.query(TestRun)
-        .options(selectinload(TestRun.results), selectinload(TestRun.ci_trigger))
+        .options(selectinload(TestRun.results), selectinload(TestRun.ci_trigger), selectinload(TestRun.artifacts))
         .filter(TestRun.id == run_id)
         .first()
     )

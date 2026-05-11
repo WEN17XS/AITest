@@ -165,9 +165,12 @@ class TestCaseOut(TestCaseCreate):
 
 class RunCreate(BaseModel):
     project_id: int
+    environment_id: int | None = None
     name: str = "手动测试执行"
     case_ids: list[int] | None = None
     trigger_type: str = "manual"
+    executor_type: str = "mock"
+    executor_config: dict[str, Any] = Field(default_factory=dict)
     branch: str | None = None
     commit_sha: str | None = None
     changed_files: list[str] = Field(default_factory=list)
@@ -183,6 +186,21 @@ class RunResultOut(BaseModel):
     artifacts: list[str]
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RunArtifactOut(BaseModel):
+    id: int
+    run_id: int
+    result_id: int | None
+    artifact_type: str
+    name: str
+    path: str
+    content_type: str | None
+    size_bytes: int
+    metadata: dict[str, Any] = Field(default_factory=dict, alias="metadata_")
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 class CiTriggerOut(BaseModel):
@@ -203,14 +221,18 @@ class CiTriggerOut(BaseModel):
 class RunOut(BaseModel):
     id: int
     project_id: int
+    environment_id: int | None
     name: str
     trigger_type: str
+    executor_type: str
+    executor_config: dict[str, Any]
     status: str
     branch: str | None
     commit_sha: str | None
     changed_files: list[str]
     summary: dict[str, Any]
     report: str | None
+    error_message: str | None
     started_at: datetime | None
     finished_at: datetime | None
     created_at: datetime
@@ -221,10 +243,14 @@ class RunOut(BaseModel):
 
 class RunDetailOut(RunOut):
     ci_trigger: CiTriggerOut | None = None
+    artifacts: list[RunArtifactOut] = Field(default_factory=list)
 
 
 class CiWebhookRequest(BaseModel):
     project_id: int
+    environment_id: int | None = None
+    executor_type: str = "mock"
+    executor_config: dict[str, Any] = Field(default_factory=dict)
     branch: str | None = None
     commit_sha: str | None = None
     changed_files: list[str] = Field(default_factory=list)

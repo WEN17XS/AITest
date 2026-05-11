@@ -15,11 +15,38 @@
 
 ## 第二阶段：真实测试执行
 
-- Playwright Web UI 执行器
-- pytest/API 执行器
-- 截图、视频、日志和附件存储
-- 失败用例重跑
-- flaky 用例识别
+目标是把当前模拟执行闭环升级为可插拔真实执行体系。实施批次如下：
+
+1. 执行器基础架构
+   - 抽出 `TestExecutor` 基础接口、执行上下文和标准结果对象。
+   - 增加 `ExecutorRegistry`，统一按执行器类型或用例类型选择执行器。
+   - 将现有模拟执行逻辑迁移为 `MockExecutor`，保持当前行为兼容。
+
+2. 运行配置和环境注入
+   - 给测试运行增加 `executor_type`、`environment_id`、`executor_config`、`error_message`。
+   - 编排层加载项目默认环境或指定环境。
+   - 将 `base_url` 和安全变量注入执行上下文。
+
+3. 附件和执行产物
+   - 新增 `test_run_artifacts`。
+   - 定义本地存储目录 `backend/storage/runs/{run_id}/`。
+   - 支持运行级和用例级日志、截图、视频、trace、结构化报告。
+
+4. Playwright Web UI 执行器
+   - 支持 `web_ui` 用例类型。
+   - 第一版支持 `goto`、`click`、`fill`、`expect_text`、`expect_url` 等受控动作。
+   - 失败时保存截图和 trace，并写入运行详情。
+
+5. pytest/API 执行器
+   - 支持 `api` 和 `integration` 用例类型。
+   - 支持环境变量注入、pytest 执行、结果解析和日志收集。
+   - 后续扩展关联仓库内已有 pytest 标记。
+
+6. 稳定性和智能化
+   - 失败用例重跑。
+   - flaky 用例识别。
+   - 失败归因 Agent。
+   - CI 状态回写和质量门禁。
 
 ## 第三阶段：智能测试
 

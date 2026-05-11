@@ -141,13 +141,33 @@ POST /api/v1/runs
 ```json
 {
   "project_id": 1,
+  "environment_id": 1,
   "name": "手动回归测试",
   "case_ids": [1, 2, 3],
-  "trigger_type": "manual"
+  "trigger_type": "manual",
+  "executor_type": "mock",
+  "executor_config": {}
 }
 ```
 
 如果不传 `case_ids`，默认执行该项目下所有已审核通过的用例。
+如果不传 `environment_id`，执行编排层会使用项目默认环境；如果项目没有默认环境，当前 `mock` 执行器仍可执行，后续真实执行器可能会要求必须提供环境。
+`executor_type` 当前默认是 `mock`，后续会支持 `playwright` 和 `pytest`。
+
+当 `executor_type` 为 `playwright` 时，测试用例建议使用 `type = "web_ui"`，并在 `steps` 中使用受控动作：
+
+```json
+[
+  { "action": "goto", "url": "/login" },
+  { "action": "fill", "selector": "#username", "value": "demo" },
+  { "action": "fill", "selector": "#password", "value": "Demo123456" },
+  { "action": "click", "selector": "button[type=submit]" },
+  { "action": "expect_url", "contains": "/dashboard" },
+  { "action": "expect_text", "selector": "body", "text": "欢迎" }
+]
+```
+
+Playwright 最小执行器当前支持 `goto`、`click`、`fill`、`expect_text`、`expect_url`。失败时会保存截图附件。
 
 查看测试报告详情：
 
@@ -155,7 +175,8 @@ POST /api/v1/runs
 GET /api/v1/runs/{run_id}
 ```
 
-详情会返回运行基础信息、执行结果列表、报告正文，以及关联的 `ci_trigger`。
+详情会返回运行基础信息、执行结果列表、报告正文、附件列表，以及关联的 `ci_trigger`。
+附件列表字段为 `artifacts`，每条附件包含 `artifact_type`、`name`、`path`、`content_type`、`size_bytes` 和 `metadata_`。`path` 是相对存储路径，不是本机绝对路径。
 
 ## CI 触发记录
 
@@ -177,6 +198,8 @@ CI webhook 本身不使用用户 token，而是使用 `X-AITestHub-Token` 校验
 POST /api/v1/ci/webhook
 X-AITestHub-Token: <WEBHOOK_SECRET>
 ```
+
+CI webhook 请求体也支持 `environment_id`、`executor_type` 和 `executor_config`，默认执行器同样是 `mock`。
 
 ## 知识库
 

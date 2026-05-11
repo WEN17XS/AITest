@@ -482,6 +482,11 @@ textarea:focus {
   min-height: 100px;
 }
 
+.steps-editor {
+  font-family: "Cascadia Code", "Consolas", monospace;
+  min-height: 190px !important;
+}
+
 .triple-row {
   display: grid;
   gap: 8px;
@@ -572,6 +577,76 @@ textarea:focus {
 
 .run-button {
   margin-bottom: 14px;
+}
+
+.run-config {
+  background: #f7fafb;
+  border: 1px solid #dce5e6;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.run-config label {
+  color: #53656b;
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.segmented-control {
+  background: #edf3f2;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+  padding: 5px;
+}
+
+.segmented-control button {
+  background: transparent;
+  color: #53656b;
+  padding: 8px 10px;
+}
+
+.segmented-control button.active {
+  background: #ffffff;
+  color: #145f53;
+  font-weight: 900;
+}
+
+.executor-options {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 130px minmax(0, 1fr);
+}
+
+.checkbox-row {
+  align-items: center;
+  display: flex !important;
+  gap: 8px !important;
+  min-height: 42px;
+}
+
+.checkbox-row input {
+  width: auto;
+}
+
+.run-config-summary {
+  align-items: center;
+  color: #607177;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+}
+
+.run-config-summary strong {
+  color: #173b40;
+  font-size: 20px;
 }
 
 .run-item pre,
@@ -740,6 +815,7 @@ textarea:focus {
   .metric-grid,
   .project-strip,
   .triple-row,
+  .executor-options,
   .detail-grid {
     grid-template-columns: 1fr;
   }

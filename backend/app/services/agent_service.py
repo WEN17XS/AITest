@@ -47,9 +47,18 @@ class TestCaseAgent:
                     "你是 AITestHub 平台中的测试用例生成 Agent。"
                     "你负责把需求文档、自然语言描述或功能说明拆解成可人工审核的测试用例。"
                     "你必须优先参考输入中的测试 skill 知识，但不得编造需求未出现的功能。"
+                    "当需求描述页面点击、输入框、搜索框、按钮、页面跳转、文案校验等浏览器操作时，"
+                    "必须生成 type=web_ui 的用例，并使用 Playwright 受控步骤："
+                    "goto、click、fill、expect_text、expect_url。"
+                    "web_ui 步骤字段示例："
+                    "{\"order\":1,\"action\":\"goto\",\"url\":\"/\"},"
+                    "{\"order\":2,\"action\":\"fill\",\"selector\":\"#kw\",\"value\":\"井冈山大学\"},"
+                    "{\"order\":3,\"action\":\"click\",\"selector\":\"#su\"},"
+                    "{\"order\":4,\"action\":\"expect_text\",\"selector\":\"body\",\"text\":\"井冈山大学\"}。"
+                    "当需求描述接口、HTTP、请求、响应、状态码时，生成 type=api。"
                     "必须只返回 JSON，不要返回 Markdown，不要解释。"
                     "JSON 格式为："
-                    "{\"cases\":[{\"title\":\"\",\"type\":\"functional|api|ui|regression|security\","
+                    "{\"cases\":[{\"title\":\"\",\"type\":\"functional|api|web_ui|regression|security\","
                     "\"priority\":\"P0|P1|P2|P3\",\"preconditions\":\"\","
                     "\"steps\":[{\"order\":1,\"action\":\"\"}],"
                     "\"expected_result\":\"\",\"tags\":[\"\"]}]}"
@@ -91,7 +100,8 @@ class TestCaseAgent:
 
         cases: list[TestCaseCreate] = []
         for item in raw_cases[:12]:
-            steps = self._normalize_steps(item.get("steps"))
+            case_type = self._normalize_case_type(str(item.get("type") or "functional"), item.get("steps"))
+            steps = self._normalize_steps(item.get("steps"), case_type)
             if not steps:
                 continue
 
@@ -100,7 +110,7 @@ class TestCaseAgent:
                     project_id=project_id,
                     requirement_id=requirement_id,
                     title=str(item.get("title") or "未命名测试用例")[:240],
-                    type=str(item.get("type") or "functional"),
+                    type=case_type,
                     priority=self._normalize_priority(str(item.get("priority") or "P2")),
                     status="draft",
                     preconditions=str(item.get("preconditions") or "测试环境和测试数据已准备完成。"),
@@ -113,19 +123,50 @@ class TestCaseAgent:
             )
         return cases
 
-    def _normalize_steps(self, value: Any) -> list[dict[str, Any]]:
+    def _normalize_steps(self, value: Any, case_type: str = "functional") -> list[dict[str, Any]]:
         if not isinstance(value, list):
             return []
 
         steps = []
         for index, step in enumerate(value, start=1):
             if isinstance(step, dict):
+                if case_type == "web_ui":
+                    normalized_step = self._normalize_web_ui_step(step, index)
+                    if normalized_step:
+                        steps.append(normalized_step)
+                    continue
                 action = str(step.get("action", "")).strip()
             else:
                 action = str(step).strip()
             if action:
                 steps.append({"order": index, "action": action})
         return steps
+
+    def _normalize_web_ui_step(self, step: dict[str, Any], index: int) -> dict[str, Any] | None:
+        action = str(step.get("action", "")).strip()
+        if action not in {"goto", "click", "fill", "expect_text", "expect_url"}:
+            return None
+
+        result: dict[str, Any] = {"order": int(step.get("order") or index), "action": action}
+        for key in ("url", "selector", "value", "text", "contains"):
+            if step.get(key) is not None and str(step.get(key)).strip():
+                result[key] = str(step.get(key)).strip()
+        return result
+
+    def _normalize_case_type(self, value: str, steps: Any = None) -> str:
+        normalized = value.strip().lower().replace("-", "_")
+        aliases = {"ui": "web_ui", "web": "web_ui", "webui": "web_ui", "interface": "api"}
+        normalized = aliases.get(normalized, normalized)
+
+        if normalized not in {"functional", "api", "web_ui", "regression", "security", "manual"}:
+            normalized = "functional"
+
+        if isinstance(steps, list):
+            actions = {str(step.get("action", "")).strip() for step in steps if isinstance(step, dict)}
+            if actions & {"goto", "click", "fill", "expect_text", "expect_url"}:
+                return "web_ui"
+
+        return normalized
 
     def _normalize_priority(self, priority: str) -> str:
         return priority if priority in {"P0", "P1", "P2", "P3"} else "P2"
@@ -144,6 +185,11 @@ class TestCaseAgent:
         requirement_id: int | None = None,
     ) -> list[TestCaseCreate]:
         features = self._extract_features(content)
+        if self._looks_like_web_ui_requirement(content):
+            return self._generate_web_ui_cases(project_id, content, requirement_id, features)
+        if self._looks_like_api_requirement(content):
+            return self._generate_api_cases(project_id, content, requirement_id, features)
+
         cases: list[TestCaseCreate] = []
 
         for index, feature in enumerate(features, start=1):
@@ -190,6 +236,103 @@ class TestCaseAgent:
 
         cases.append(self._regression_case(project_id, requirement_id))
         return cases
+
+    def _generate_web_ui_cases(
+        self,
+        project_id: int,
+        content: str,
+        requirement_id: int | None,
+        features: list[str],
+    ) -> list[TestCaseCreate]:
+        query = self._extract_quoted_text(content) or "测试关键词"
+        feature = features[0] if features else content[:40]
+        return [
+            TestCaseCreate(
+                project_id=project_id,
+                requirement_id=requirement_id,
+                title=f"验证页面搜索“{query}”",
+                type="web_ui",
+                priority="P1",
+                status="draft",
+                preconditions="已配置被测站点环境，搜索页面可访问。",
+                steps=[
+                    {"order": 1, "action": "goto", "url": "/"},
+                    {"order": 2, "action": "fill", "selector": "#kw", "value": query},
+                    {"order": 3, "action": "click", "selector": "#su"},
+                    {"order": 4, "action": "expect_text", "selector": "body", "text": query},
+                ],
+                expected_result=f"页面展示与“{query}”相关的搜索结果或反馈信息。",
+                tags=["agent-generated", "web-ui", "playwright"],
+                generated_by="agent",
+                ai_review={},
+            ),
+            TestCaseCreate(
+                project_id=project_id,
+                requirement_id=requirement_id,
+                title=f"验证{feature}页面基础可访问",
+                type="web_ui",
+                priority="P2",
+                status="draft",
+                preconditions="已配置被测站点环境。",
+                steps=[
+                    {"order": 1, "action": "goto", "url": "/"},
+                    {"order": 2, "action": "expect_text", "selector": "body", "text": query},
+                ],
+                expected_result="页面可正常加载，关键文案或搜索关键词可被验证。",
+                tags=["agent-generated", "web-ui"],
+                generated_by="agent",
+                ai_review={},
+            ),
+        ]
+
+    def _generate_api_cases(
+        self,
+        project_id: int,
+        content: str,
+        requirement_id: int | None,
+        features: list[str],
+    ) -> list[TestCaseCreate]:
+        feature = features[0] if features else "接口能力"
+        return [
+            TestCaseCreate(
+                project_id=project_id,
+                requirement_id=requirement_id,
+                title=f"验证{feature}接口正常响应",
+                type="api",
+                priority="P1",
+                status="draft",
+                preconditions="接口服务可访问，鉴权和测试数据已准备完成。",
+                steps=[
+                    {"order": 1, "action": f"构造与“{feature}”相关的合法请求。"},
+                    {"order": 2, "action": "发送请求并记录状态码、响应体和耗时。"},
+                    {"order": 3, "action": "校验状态码、业务字段和错误码符合预期。"},
+                ],
+                expected_result="接口返回成功状态，响应结构和业务数据符合需求。",
+                tags=["agent-generated", "api"],
+                generated_by="agent",
+                ai_review={},
+            )
+        ]
+
+    def _looks_like_web_ui_requirement(self, content: str) -> bool:
+        return any(keyword in content for keyword in ["点击", "搜索框", "输入框", "按钮", "页面", "跳转", "填入", "搜索"])
+
+    def _looks_like_api_requirement(self, content: str) -> bool:
+        lowered = content.lower()
+        return any(keyword in lowered for keyword in ["api", "http", "接口", "请求", "响应", "状态码", "endpoint"])
+
+    def _extract_quoted_text(self, content: str) -> str | None:
+        patterns = [
+            r'"([^"]+)"',
+            r"“([^”]+)”",
+            r"'([^']+)'",
+            r"搜索\s*([^\s，。,.]+)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, content)
+            if match:
+                return match.group(1).strip()
+        return None
 
     def _extract_features(self, content: str) -> list[str]:
         text = content.strip()
@@ -307,7 +450,7 @@ class TestCaseAgent:
             missing.append("步骤数量偏少，可能缺少操作过程或验证动作。")
         if not test_case.expected_result.strip():
             missing.append("缺少可验证的预期结果。")
-        if test_case.type not in {"functional", "api", "ui", "regression", "security", "manual"}:
+        if test_case.type not in {"functional", "api", "web_ui", "ui", "regression", "security", "manual"}:
             out_of_scope.append("用例类型不在平台推荐范围内。")
         if "成功" in test_case.title and any(word in test_case.expected_result for word in ["失败", "错误", "拒绝"]):
             contradictions.append("标题描述成功场景，但预期结果包含失败语义。")

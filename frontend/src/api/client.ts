@@ -111,18 +111,36 @@ export type CiTrigger = {
   created_at: string;
 };
 
+export type RunArtifact = {
+  id: number;
+  run_id: number;
+  result_id?: number;
+  artifact_type: string;
+  name: string;
+  path: string;
+  content_type?: string;
+  size_bytes: number;
+  metadata_: Record<string, unknown>;
+  created_at: string;
+};
+
 export type TestRun = {
   id: number;
   project_id: number;
+  environment_id?: number;
   name: string;
   trigger_type: string;
+  executor_type: string;
+  executor_config: Record<string, unknown>;
   status: string;
   branch?: string;
   commit_sha?: string;
   changed_files: string[];
   summary: Record<string, number>;
   report?: string;
+  error_message?: string;
   results?: RunResult[];
+  artifacts?: RunArtifact[];
   ci_trigger?: CiTrigger;
 };
 
@@ -177,7 +195,14 @@ export const api = {
       body: JSON.stringify({ status, review_comment }),
     }),
 
-  createRun: (payload: { project_id: number; name: string; case_ids?: number[] }) =>
+  createRun: (payload: {
+    project_id: number;
+    environment_id?: number;
+    name: string;
+    case_ids?: number[];
+    executor_type?: string;
+    executor_config?: Record<string, unknown>;
+  }) =>
     request<TestRun>('/runs', { method: 'POST', body: JSON.stringify(payload) }),
   listRuns: (projectId?: number) => request<TestRun[]>(`/runs${projectId ? `?project_id=${projectId}` : ''}`),
   getRun: (runId: number) => request<TestRun>(`/runs/${runId}`),

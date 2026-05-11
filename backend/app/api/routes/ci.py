@@ -22,8 +22,11 @@ def ci_webhook(
 
     run = TestRun(
         project_id=payload.project_id,
+        environment_id=payload.environment_id,
         name=f"{payload.triggered_by} 触发测试",
         trigger_type=payload.triggered_by,
+        executor_type=payload.executor_type,
+        executor_config=payload.executor_config,
         branch=payload.branch,
         commit_sha=payload.commit_sha,
         changed_files=payload.changed_files,
