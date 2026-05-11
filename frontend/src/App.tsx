@@ -89,6 +89,10 @@ export function App() {
   const [knowledgeTitle, setKnowledgeTitle] = useState('登录模块测试经验');
   const [knowledgeContent, setKnowledgeContent] = useState('登录失败时需要覆盖空密码、错误密码、锁定账号和无权限账号。');
   const [knowledgeQuery, setKnowledgeQuery] = useState('登录');
+  const [knowledgeImportType, setKnowledgeImportType] = useState('historical_defect');
+  const [knowledgeImportSkill, setKnowledgeImportSkill] = useState('历史缺陷测试 skill');
+  const [knowledgeImportScore, setKnowledgeImportScore] = useState(4);
+  const [knowledgeImportFile, setKnowledgeImportFile] = useState<File | undefined>();
   const [editingCaseId, setEditingCaseId] = useState<number | undefined>();
   const [draftCase, setDraftCase] = useState<Partial<TestCase>>(emptyCase);
   const [loading, setLoading] = useState(false);
@@ -330,6 +334,30 @@ export function App() {
     setNotice(`找到 ${results.length} 条知识记录。`);
   }
 
+  async function importKnowledgeFile() {
+    if (!selectedProjectId || !knowledgeImportFile) {
+      setNotice('请选择项目和要导入的文件。');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await api.importKnowledge({
+        project_id: selectedProjectId,
+        source_type: knowledgeImportType,
+        skill_name: knowledgeImportSkill,
+        quality_score: knowledgeImportScore,
+        file: knowledgeImportFile,
+      });
+      setNotice(`已导入 ${result.imported} 条知识，跳过 ${result.skipped} 条。`);
+      setKnowledgeImportFile(undefined);
+      await refresh(selectedProjectId);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : '导入知识失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   if (!currentUser) {
     return (
       <AuthScreen
@@ -404,6 +432,16 @@ export function App() {
             setKnowledgeQuery={setKnowledgeQuery}
             createKnowledge={createKnowledge}
             searchKnowledge={searchKnowledge}
+            importKnowledgeFile={importKnowledgeFile}
+            importType={knowledgeImportType}
+            setImportType={setKnowledgeImportType}
+            importSkill={knowledgeImportSkill}
+            setImportSkill={setKnowledgeImportSkill}
+            importScore={knowledgeImportScore}
+            setImportScore={setKnowledgeImportScore}
+            importFile={knowledgeImportFile}
+            setImportFile={setKnowledgeImportFile}
+            loading={loading}
             selectedProjectId={selectedProjectId}
           />
         );
@@ -921,6 +959,16 @@ function KnowledgeView(props: {
   setKnowledgeQuery: (value: string) => void;
   createKnowledge: () => void;
   searchKnowledge: () => void;
+  importKnowledgeFile: () => void;
+  importType: string;
+  setImportType: (value: string) => void;
+  importSkill: string;
+  setImportSkill: (value: string) => void;
+  importScore: number;
+  setImportScore: (value: number) => void;
+  importFile?: File;
+  setImportFile: (value?: File) => void;
+  loading: boolean;
   selectedProjectId?: number;
 }) {
   return (
@@ -928,6 +976,32 @@ function KnowledgeView(props: {
       <PanelTitle icon={Database} title="测试知识库" />
       <div className="two-column compact-form">
         <div>
+          <div className="import-box">
+            <strong>批量导入</strong>
+            <select value={props.importType} onChange={(event) => props.setImportType(event.target.value)}>
+              <option value="requirement">需求文档</option>
+              <option value="historical_defect">历史缺陷</option>
+              <option value="business_rule">业务规则</option>
+              <option value="test_strategy">测试策略</option>
+            </select>
+            <input value={props.importSkill} onChange={(event) => props.setImportSkill(event.target.value)} />
+            <input
+              type="number"
+              min={1}
+              max={5}
+              value={props.importScore}
+              onChange={(event) => props.setImportScore(Number(event.target.value))}
+            />
+            <input
+              type="file"
+              accept=".txt,.md,.csv,.json,text/plain,text/markdown,application/json,text/csv"
+              onChange={(event) => props.setImportFile(event.target.files?.[0])}
+            />
+            <button className="wide-button" onClick={props.importKnowledgeFile} disabled={!props.selectedProjectId || !props.importFile || props.loading}>
+              导入文件
+            </button>
+            {props.importFile && <p>已选择：{props.importFile.name}</p>}
+          </div>
           <input value={props.knowledgeTitle} onChange={(event) => props.setKnowledgeTitle(event.target.value)} />
           <textarea value={props.knowledgeContent} onChange={(event) => props.setKnowledgeContent(event.target.value)} />
           <button className="wide-button" onClick={props.createKnowledge} disabled={!props.selectedProjectId}>保存知识</button>

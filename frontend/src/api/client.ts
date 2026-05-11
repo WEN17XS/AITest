@@ -15,9 +15,10 @@ export function clearToken() {
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers ?? {}),
     },
@@ -139,6 +140,12 @@ export type Knowledge = {
   metadata_: Record<string, unknown>;
 };
 
+export type KnowledgeImportResult = {
+  imported: number;
+  skipped: number;
+  items: Knowledge[];
+};
+
 export const api = {
   register: (payload: { username: string; password: string; display_name: string }) =>
     request<AuthResponse>('/auth/register', { method: 'POST', body: JSON.stringify(payload) }),
@@ -177,6 +184,23 @@ export const api = {
   listKnowledge: (projectId: number) => request<Knowledge[]>(`/knowledge?project_id=${projectId}`),
   createKnowledge: (payload: Omit<Knowledge, 'id' | 'status' | 'triggers' | 'quality_score'> & Partial<Pick<Knowledge, 'status' | 'triggers' | 'quality_score'>>) =>
     request<Knowledge>('/knowledge', { method: 'POST', body: JSON.stringify(payload) }),
+  importKnowledge: (payload: {
+    project_id: number;
+    source_type: string;
+    status?: string;
+    skill_name?: string;
+    quality_score?: number;
+    file: File;
+  }) => {
+    const form = new FormData();
+    form.append('project_id', String(payload.project_id));
+    form.append('source_type', payload.source_type);
+    form.append('status', payload.status ?? 'active');
+    form.append('skill_name', payload.skill_name ?? '');
+    form.append('quality_score', String(payload.quality_score ?? 3));
+    form.append('file', payload.file);
+    return request<KnowledgeImportResult>('/knowledge/import', { method: 'POST', body: form });
+  },
   searchKnowledge: (payload: { project_id: number; query: string; limit?: number }) =>
     request<Knowledge[]>('/knowledge/search', { method: 'POST', body: JSON.stringify(payload) }),
 };

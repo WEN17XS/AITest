@@ -202,3 +202,36 @@ POST /api/v1/knowledge
 - `quality_score`：1-5 分，生成时优先召回高分知识。
 
 当前仍是关键词召回，后续接入 embedding 模型后会升级为向量检索。
+
+### 批量导入知识
+
+```http
+POST /api/v1/knowledge/import
+Content-Type: multipart/form-data
+```
+
+表单字段：
+
+- `project_id`：项目 ID。
+- `source_type`：知识来源类型，建议使用 `requirement`、`historical_defect`、`business_rule`、`test_strategy`。
+- `status`：默认 `active`。
+- `skill_name`：导入后归属的测试 skill 名称。
+- `quality_score`：1-5 分，默认 3。
+- `file`：上传文件。
+
+支持格式：
+
+- `.md`：按 Markdown 标题切分为多条知识。
+- `.txt`：按空行和长度切分为多条知识。
+- `.csv`：第一行作为表头，推荐字段为 `title`、`content`、`source_type`、`source_id`、`skill_name`、`triggers`、`quality_score`。
+- `.json`：支持单个对象、对象数组，或 `{ "items": [...] }`。
+
+返回示例：
+
+```json
+{
+  "imported": 2,
+  "skipped": 0,
+  "items": []
+}
+```

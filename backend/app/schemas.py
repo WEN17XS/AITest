@@ -259,5 +259,11 @@ class KnowledgeSearchRequest(BaseModel):
     limit: int = 5
 
 
+class KnowledgeImportOut(BaseModel):
+    imported: int
+    skipped: int
+    items: list[KnowledgeOut]
+
+
 class SkillKnowledgeOut(KnowledgeOut):
     pass

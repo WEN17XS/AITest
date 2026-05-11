@@ -652,6 +652,32 @@ textarea:focus {
   min-height: 170px;
 }
 
+.import-box {
+  background: #f7fafb;
+  border: 1px solid #dce5e6;
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.import-box strong {
+  color: #203437;
+}
+
+.import-box input[type='file'] {
+  background: #ffffff;
+  border-style: dashed;
+}
+
+.import-box p {
+  color: #607177;
+  font-size: 13px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1120px) {
   .content-shell,
   .two-column,
