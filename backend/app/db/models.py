@@ -126,6 +126,7 @@ class TestRunResult(Base):
     message: Mapped[str | None] = mapped_column(Text)
     logs: Mapped[str | None] = mapped_column(Text)
     artifacts: Mapped[list[str]] = mapped_column(JSON, default=list)
+    ai_diagnosis: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     run: Mapped[TestRun] = relationship(back_populates="results")
     artifact_records: Mapped[list["TestRunArtifact"]] = relationship(back_populates="result")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
 
 from app.db.models import KnowledgeChunk, TestCase
@@ -43,15 +44,33 @@ class KnowledgeService:
             KnowledgeChunk.status.in_(["active", "verified"]),
         )
         if keywords:
-            conditions = []
-            for keyword in keywords[:8]:
-                pattern = f"%{keyword}%"
-                conditions.append(KnowledgeChunk.title.ilike(pattern))
-                conditions.append(KnowledgeChunk.content.ilike(pattern))
-            from sqlalchemy import or_
-
-            db_query = db_query.filter(or_(*conditions))
+            db_query = db_query.filter(self._keyword_condition(keywords))
         return db_query.order_by(KnowledgeChunk.quality_score.desc(), KnowledgeChunk.id.desc()).limit(limit).all()
+
+    def get_generation_context(self, db: Session, project_id: int, query: str, limit: int = 8) -> list[KnowledgeChunk]:
+        """召回用例生成专用知识。
+
+        生成链路除了关键词匹配，还需要优先参考历史失败归因、选择器策略、
+        站点兼容性和反例经验，避免 Agent 重复生成已知不稳定或不可执行的步骤。
+        """
+        keywords = self._extract_keywords(query)
+        chunks = self.get_skill_context(db, project_id, query, limit=limit)
+
+        source_types = self._generation_source_types(query)
+        typed_query = db.query(KnowledgeChunk).filter(
+            KnowledgeChunk.project_id == project_id,
+            KnowledgeChunk.status.in_(["active", "verified"]),
+            KnowledgeChunk.source_type.in_(source_types),
+        )
+        if keywords:
+            typed_query = typed_query.filter(or_(self._keyword_condition(keywords), KnowledgeChunk.source_type.in_(source_types[:4])))
+
+        typed_chunks = (
+            typed_query.order_by(KnowledgeChunk.quality_score.desc(), KnowledgeChunk.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return self._dedupe_and_rank([*chunks, *typed_chunks], limit)
 
     def format_skill_context(self, chunks: list[KnowledgeChunk]) -> str:
         if not chunks:
@@ -176,6 +195,53 @@ class KnowledgeService:
         values = [test_case.type, test_case.priority, *(test_case.tags or [])]
         title_words = self._extract_keywords(test_case.title)
         return [item for item in [*values, *title_words] if item][:12]
+
+    def _keyword_condition(self, keywords: list[str]):
+        conditions = []
+        for keyword in keywords[:8]:
+            pattern = f"%{keyword}%"
+            conditions.append(KnowledgeChunk.title.ilike(pattern))
+            conditions.append(KnowledgeChunk.content.ilike(pattern))
+            conditions.append(cast(KnowledgeChunk.triggers, String).ilike(pattern))
+        return or_(*conditions)
+
+    def _generation_source_types(self, query: str) -> list[str]:
+        lowered = query.lower()
+        web_ui_keywords = ["web_ui", "ui", "页面", "点击", "搜索框", "输入框", "按钮", "跳转", "playwright", "selector"]
+        if any(keyword in lowered for keyword in web_ui_keywords):
+            return [
+                "selector_strategy",
+                "execution_failure",
+                "site_compatibility",
+                "anti_pattern",
+                "reviewed_test_case",
+                "approved_test_case",
+            ]
+        api_keywords = ["api", "http", "接口", "请求", "响应", "状态码", "endpoint"]
+        if any(keyword in lowered for keyword in api_keywords):
+            return ["execution_failure", "anti_pattern", "reviewed_test_case", "approved_test_case"]
+        return ["anti_pattern", "reviewed_test_case", "approved_test_case"]
+
+    def _dedupe_and_rank(self, chunks: list[KnowledgeChunk], limit: int) -> list[KnowledgeChunk]:
+        priority = {
+            "selector_strategy": 60,
+            "execution_failure": 50,
+            "site_compatibility": 45,
+            "anti_pattern": 40,
+            "reviewed_test_case": 20,
+            "approved_test_case": 20,
+        }
+        deduped = {chunk.id: chunk for chunk in chunks}
+        ranked = sorted(
+            deduped.values(),
+            key=lambda item: (
+                priority.get(item.source_type, 0),
+                item.quality_score or 0,
+                item.id or 0,
+            ),
+            reverse=True,
+        )
+        return ranked[:limit]
 
     def _extract_keywords(self, text: str) -> list[str]:
         cleaned = text.strip()

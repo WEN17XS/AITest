@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
 from app.schemas import TestCaseCreate
+from app.services.api_doc_parser import ApiDocParser, ApiEndpointSpec
 from app.services.llm_service import get_deepseek_chat_model
 
 
@@ -27,8 +28,35 @@ class TestCaseAgent:
     ) -> list[TestCaseCreate]:
         llm_cases = self._generate_with_deepseek_agent(project_id, content, requirement_id, skill_context)
         if llm_cases:
+            llm_cases = self._ensure_required_rule_cases(project_id, content, requirement_id, llm_cases)
             return self.review_cases(content, llm_cases, skill_context)
-        return self.review_cases(content, self._generate_with_rules(project_id, content, requirement_id), skill_context)
+        rule_cases = self._generate_with_rules(project_id, content, requirement_id, skill_context)
+        return self._review_cases_with_rules(content, rule_cases)
+
+    def _ensure_required_rule_cases(
+        self,
+        project_id: int,
+        content: str,
+        requirement_id: int | None,
+        cases: list[TestCaseCreate],
+    ) -> list[TestCaseCreate]:
+        if self._looks_like_shopxo_cart_requirement(content) and not self._has_executable_api_case(cases):
+            return [self._shopxo_login_cart_case(project_id, requirement_id, content), *cases]
+        if self._looks_like_api_requirement(content) and not self._has_executable_api_case(cases):
+            return [
+                *self._generate_api_cases(project_id, content, requirement_id, self._extract_features(content), ""),
+                *cases,
+            ]
+        return cases
+
+    def _has_executable_api_case(self, cases: list[TestCaseCreate]) -> bool:
+        for case in cases:
+            if case.type != "api":
+                continue
+            actions = {str(step.get("action", "")).strip() for step in case.steps if isinstance(step, dict)}
+            if "request" in actions and (actions & {"expect_status", "expect_json_contains", "expect_text_contains"}):
+                return True
+        return False
 
     def _generate_with_deepseek_agent(
         self,
@@ -47,15 +75,29 @@ class TestCaseAgent:
                     "你是 AITestHub 平台中的测试用例生成 Agent。"
                     "你负责把需求文档、自然语言描述或功能说明拆解成可人工审核的测试用例。"
                     "你必须优先参考输入中的测试 skill 知识，但不得编造需求未出现的功能。"
+                    "如果测试 skill 知识中包含 selector_strategy、execution_failure、site_compatibility 或 anti_pattern，"
+                    "这些内容必须作为生成约束：已知不可见、失效或不稳定的 selector 不要作为唯一选择器；"
+                    "必须为 Web UI 步骤补充 selector_candidates，并优先选择可见、可编辑、可点击的元素。"
+                    "如果知识提示公开第三方站点存在安全验证、反自动化或 DOM 变更风险，"
+                    "需要在前置条件、预期结果或 tags 中标记该风险，不要承诺结果页一定稳定出现。"
+                    "如果知识是 anti_pattern，除非需求明确要求，否则应避免重复生成类似问题。"
                     "当需求描述页面点击、输入框、搜索框、按钮、页面跳转、文案校验等浏览器操作时，"
                     "必须生成 type=web_ui 的用例，并使用 Playwright 受控步骤："
-                    "goto、click、fill、expect_text、expect_url。"
+                    "goto、click、fill、press、expect_text、expect_url。"
                     "web_ui 步骤字段示例："
                     "{\"order\":1,\"action\":\"goto\",\"url\":\"/\"},"
-                    "{\"order\":2,\"action\":\"fill\",\"selector\":\"#kw\",\"value\":\"井冈山大学\"},"
-                    "{\"order\":3,\"action\":\"click\",\"selector\":\"#su\"},"
-                    "{\"order\":4,\"action\":\"expect_text\",\"selector\":\"body\",\"text\":\"井冈山大学\"}。"
+                    "{\"order\":2,\"action\":\"fill\",\"selector\":\"#kw\","
+                    "\"selector_candidates\":[\"#chat-textarea\",\"textarea.chat-input-textarea\"],"
+                    "\"value\":\"井冈山大学\"},"
+                    "{\"order\":3,\"action\":\"click\",\"selector\":\"#su\","
+                    "\"selector_candidates\":[\"#chat-submit-button\",\"button:has-text('百度一下')\"]},"
+                    "{\"order\":4,\"action\":\"press\",\"selector\":\"#kw\","
+                    "\"selector_candidates\":[\"#chat-textarea\",\"textarea.chat-input-textarea\"],"
+                    "\"key\":\"Enter\"},"
+                    "{\"order\":5,\"action\":\"expect_text\",\"selector\":\"body\",\"text\":\"井冈山大学\"}。"
                     "当需求描述接口、HTTP、请求、响应、状态码时，生成 type=api。"
+                    "api 步骤必须使用受控动作：request、extract_json、expect_status、expect_json_contains、expect_text_contains。"
+                    "需要登录态串联时，用 extract_json 从响应提取 token，再在后续请求中用 ${token} 引用。"
                     "必须只返回 JSON，不要返回 Markdown，不要解释。"
                     "JSON 格式为："
                     "{\"cases\":[{\"title\":\"\",\"type\":\"functional|api|web_ui|regression|security\","
@@ -78,7 +120,7 @@ class TestCaseAgent:
             response = model.invoke(messages)
             parsed = self._extract_json(str(response.content))
             return self._parse_llm_cases(project_id, requirement_id, parsed)
-        except (ValueError, TypeError, KeyError, ValidationError):
+        except Exception:
             return []
 
     def _extract_json(self, raw_content: str) -> dict[str, Any]:
@@ -135,6 +177,11 @@ class TestCaseAgent:
                     if normalized_step:
                         steps.append(normalized_step)
                     continue
+                if case_type == "api":
+                    normalized_step = self._normalize_api_step(step, index)
+                    if normalized_step:
+                        steps.append(normalized_step)
+                    continue
                 action = str(step.get("action", "")).strip()
             else:
                 action = str(step).strip()
@@ -144,14 +191,54 @@ class TestCaseAgent:
 
     def _normalize_web_ui_step(self, step: dict[str, Any], index: int) -> dict[str, Any] | None:
         action = str(step.get("action", "")).strip()
-        if action not in {"goto", "click", "fill", "expect_text", "expect_url"}:
+        if action not in {"goto", "click", "fill", "press", "expect_text", "expect_url"}:
             return None
 
         result: dict[str, Any] = {"order": int(step.get("order") or index), "action": action}
-        for key in ("url", "selector", "value", "text", "contains"):
+        for key in ("url", "selector", "value", "key", "text", "contains"):
             if step.get(key) is not None and str(step.get(key)).strip():
                 result[key] = str(step.get(key)).strip()
+        if isinstance(step.get("selector_candidates"), list):
+            candidates = [str(item).strip() for item in step["selector_candidates"] if str(item).strip()]
+            if candidates:
+                result["selector_candidates"] = candidates[:8]
         return result
+
+    def _normalize_api_step(self, step: dict[str, Any], index: int) -> dict[str, Any] | None:
+        action = str(step.get("action", "")).strip()
+        if action not in {"request", "extract_json", "expect_status", "expect_json_contains", "expect_text_contains"}:
+            return None
+
+        result: dict[str, Any] = {"order": int(step.get("order") or index), "action": action}
+        if action == "request":
+            result["method"] = str(step.get("method") or "GET").upper()
+            if step.get("url") is None or not str(step.get("url")).strip():
+                return None
+            result["url"] = str(step.get("url")).strip()
+            for key in ("headers", "params", "query", "json", "body", "data", "form"):
+                if key in step:
+                    result[key] = step[key]
+            return result
+        if action == "extract_json":
+            if step.get("path") is None or step.get("as") is None:
+                return None
+            result["path"] = str(step.get("path")).strip()
+            result["as"] = str(step.get("as")).strip()
+            return result
+        if action == "expect_status":
+            result["status"] = int(step.get("status") or step.get("value") or 200)
+            return result
+        if action == "expect_json_contains":
+            result["path"] = str(step.get("path") or "").strip()
+            result["value"] = step.get("value")
+            return result
+        if action == "expect_text_contains":
+            text = str(step.get("text") or step.get("value") or "").strip()
+            if not text:
+                return None
+            result["text"] = text
+            return result
+        return None
 
     def _normalize_case_type(self, value: str, steps: Any = None) -> str:
         normalized = value.strip().lower().replace("-", "_")
@@ -163,8 +250,10 @@ class TestCaseAgent:
 
         if isinstance(steps, list):
             actions = {str(step.get("action", "")).strip() for step in steps if isinstance(step, dict)}
-            if actions & {"goto", "click", "fill", "expect_text", "expect_url"}:
+            if actions & {"goto", "click", "fill", "press", "expect_text", "expect_url"}:
                 return "web_ui"
+            if actions & {"request", "extract_json", "expect_status", "expect_json_contains", "expect_text_contains"}:
+                return "api"
 
         return normalized
 
@@ -183,12 +272,13 @@ class TestCaseAgent:
         project_id: int,
         content: str,
         requirement_id: int | None = None,
+        skill_context: str = "",
     ) -> list[TestCaseCreate]:
         features = self._extract_features(content)
         if self._looks_like_web_ui_requirement(content):
             return self._generate_web_ui_cases(project_id, content, requirement_id, features)
         if self._looks_like_api_requirement(content):
-            return self._generate_api_cases(project_id, content, requirement_id, features)
+            return self._generate_api_cases(project_id, content, requirement_id, features, skill_context)
 
         cases: list[TestCaseCreate] = []
 
@@ -257,9 +347,27 @@ class TestCaseAgent:
                 preconditions="已配置被测站点环境，搜索页面可访问。",
                 steps=[
                     {"order": 1, "action": "goto", "url": "/"},
-                    {"order": 2, "action": "fill", "selector": "#kw", "value": query},
-                    {"order": 3, "action": "click", "selector": "#su"},
-                    {"order": 4, "action": "expect_text", "selector": "body", "text": query},
+                    {
+                        "order": 2,
+                        "action": "fill",
+                        "selector": "#kw",
+                        "selector_candidates": ["#chat-textarea", "textarea.chat-input-textarea"],
+                        "value": query,
+                    },
+                    {
+                        "order": 3,
+                        "action": "click",
+                        "selector": "#su",
+                        "selector_candidates": ["#chat-submit-button", "button:has-text('百度一下')"],
+                    },
+                    {
+                        "order": 4,
+                        "action": "press",
+                        "selector": "#kw",
+                        "selector_candidates": ["#chat-textarea", "textarea.chat-input-textarea"],
+                        "key": "Enter",
+                    },
+                    {"order": 5, "action": "expect_text", "selector": "body", "text": query},
                 ],
                 expected_result=f"页面展示与“{query}”相关的搜索结果或反馈信息。",
                 tags=["agent-generated", "web-ui", "playwright"],
@@ -291,8 +399,14 @@ class TestCaseAgent:
         content: str,
         requirement_id: int | None,
         features: list[str],
+        skill_context: str = "",
     ) -> list[TestCaseCreate]:
         feature = features[0] if features else "接口能力"
+        parsed_case = self._generate_api_case_from_doc(project_id, content, requirement_id, skill_context)
+        if parsed_case is not None:
+            return [parsed_case]
+        if self._looks_like_shopxo_cart_requirement(content):
+            return [self._shopxo_login_cart_case(project_id, requirement_id, content)]
         return [
             TestCaseCreate(
                 project_id=project_id,
@@ -303,9 +417,8 @@ class TestCaseAgent:
                 status="draft",
                 preconditions="接口服务可访问，鉴权和测试数据已准备完成。",
                 steps=[
-                    {"order": 1, "action": f"构造与“{feature}”相关的合法请求。"},
-                    {"order": 2, "action": "发送请求并记录状态码、响应体和耗时。"},
-                    {"order": 3, "action": "校验状态码、业务字段和错误码符合预期。"},
+                    {"order": 1, "action": "request", "method": "GET", "url": "/"},
+                    {"order": 2, "action": "expect_status", "status": 200},
                 ],
                 expected_result="接口返回成功状态，响应结构和业务数据符合需求。",
                 tags=["agent-generated", "api"],
@@ -314,12 +427,241 @@ class TestCaseAgent:
             )
         ]
 
+    def _generate_api_case_from_doc(
+        self,
+        project_id: int,
+        content: str,
+        requirement_id: int | None,
+        skill_context: str,
+    ) -> TestCaseCreate | None:
+        doc_text = f"{content}\n\n{skill_context}"
+        parser = ApiDocParser()
+        login_endpoint = parser.find(doc_text, ["login"]) or parser.find(doc_text, ["登录"])
+        target_endpoint = self._find_target_endpoint(parser, doc_text, content)
+        register_endpoint = self._find_register_endpoint(parser, doc_text, content)
+        if register_endpoint is not None and login_endpoint is not None:
+            return self._registration_then_login_case(project_id, requirement_id, register_endpoint, login_endpoint)
+        if target_endpoint is None:
+            return None
+
+        steps: list[dict[str, Any]] = []
+        if login_endpoint is not None and login_endpoint.path != target_endpoint.path:
+            steps.extend(self._endpoint_request_steps(login_endpoint, order_start=1, auth=False))
+            steps.append({"order": len(steps) + 1, "action": "expect_status", "status": 200})
+            steps.append({"order": len(steps) + 1, "action": "expect_json_contains", "path": "code", "value": 0})
+            steps.append({"order": len(steps) + 1, "action": "extract_json", "path": "data.token", "as": "token"})
+
+        steps.extend(self._endpoint_request_steps(target_endpoint, order_start=len(steps) + 1, auth=login_endpoint is not None))
+        steps.append({"order": len(steps) + 1, "action": "expect_status", "status": 200})
+        steps.append({"order": len(steps) + 1, "action": "expect_json_contains", "path": "code", "value": 0})
+
+        title = f"验证{target_endpoint.name}接口正常响应"
+        if login_endpoint is not None and login_endpoint.path != target_endpoint.path:
+            title = f"验证登录后{target_endpoint.name}接口正常响应"
+        return TestCaseCreate(
+            project_id=project_id,
+            requirement_id=requirement_id,
+            title=title,
+            type="api",
+            priority="P1",
+            status="draft",
+            preconditions="已配置接口测试环境，账号密码等敏感数据通过环境变量提供。",
+            steps=steps,
+            expected_result="接口返回 HTTP 200 且业务 code=0，响应结构符合接口文档。",
+            tags=["agent-generated", "api", "api-doc"],
+            generated_by="agent",
+            ai_review={},
+        )
+
+    def _find_target_endpoint(self, parser: ApiDocParser, doc_text: str, content: str) -> ApiEndpointSpec | None:
+        if any(keyword in content for keyword in ["购物车", "加购", "加入购物车", "cart"]):
+            cart_save = self._find_endpoint_by_path(parser, doc_text, "api/cart/save")
+            return cart_save or parser.find(doc_text, ["cart", "save"]) or parser.find(doc_text, ["购物车"])
+        features = self._extract_features(content)
+        for feature in features:
+            endpoint = parser.find(doc_text, [feature[:12]])
+            if endpoint is not None and "login" not in endpoint.path.lower():
+                return endpoint
+        endpoints = [endpoint for endpoint in parser.parse(doc_text) if "login" not in endpoint.path.lower()]
+        return endpoints[0] if endpoints else None
+
+    def _find_register_endpoint(self, parser: ApiDocParser, doc_text: str, content: str) -> ApiEndpointSpec | None:
+        if not any(keyword in content for keyword in ["注册", "register", "reg"]):
+            return None
+        exact = self._find_endpoint_by_path(parser, doc_text, "api/user/reg")
+        if exact is not None:
+            return exact
+        for endpoint in parser.parse(doc_text):
+            normalized_path = endpoint.path.lower()
+            if "user" in normalized_path and ("reg" in normalized_path or "register" in normalized_path):
+                return endpoint
+        return ApiEndpointSpec(name="reg", path="api/user/reg", method="POST", request_example={})
+
+    def _registration_then_login_case(
+        self,
+        project_id: int,
+        requirement_id: int | None,
+        register_endpoint: ApiEndpointSpec,
+        login_endpoint: ApiEndpointSpec,
+    ) -> TestCaseCreate:
+        register_step = self._endpoint_request_steps(register_endpoint, order_start=1, auth=False)[0]
+        register_step["json"] = {
+            "accounts": "${SHOPXO_USERNAME}_${SHORT_TS}",
+            "pwd": "${SHOPXO_PASSWORD}",
+            "type": "username",
+        }
+        login_step = self._endpoint_request_steps(login_endpoint, order_start=4, auth=False)[0]
+        login_step["json"] = {
+            "accounts": "${SHOPXO_USERNAME}_${SHORT_TS}",
+            "pwd": "${SHOPXO_PASSWORD}",
+            "type": "username",
+        }
+        return TestCaseCreate(
+            project_id=project_id,
+            requirement_id=requirement_id,
+            title="验证注册成功后可以正常登录",
+            type="api",
+            priority="P1",
+            status="draft",
+            preconditions="已配置接口测试环境，账号前缀和密码通过环境变量提供；执行时会追加短时间戳避免重复注册。",
+            steps=[
+                register_step,
+                {"order": 2, "action": "expect_status", "status": 200},
+                {"order": 3, "action": "expect_json_contains", "path": "code", "value": 0},
+                login_step,
+                {"order": 5, "action": "expect_status", "status": 200},
+                {"order": 6, "action": "expect_json_contains", "path": "code", "value": 0},
+                {"order": 7, "action": "extract_json", "path": "data.token", "as": "token"},
+            ],
+            expected_result="注册接口返回 code=0，随后使用同一账号密码登录成功并返回 token。",
+            tags=["agent-generated", "api", "api-doc", "registration"],
+            generated_by="agent",
+            ai_review={},
+        )
+
+    def _find_endpoint_by_path(self, parser: ApiDocParser, doc_text: str, path: str) -> ApiEndpointSpec | None:
+        normalized_path = path.lower().strip("/")
+        for endpoint in parser.parse(doc_text):
+            if endpoint.path.lower().strip("/") == normalized_path:
+                return endpoint
+        return None
+
+    def _endpoint_request_steps(self, endpoint: ApiEndpointSpec, order_start: int, auth: bool) -> list[dict[str, Any]]:
+        params = self._default_api_params(endpoint.path)
+        if auth:
+            params["token"] = "${token}"
+        body = self._prepared_request_body(endpoint)
+        step: dict[str, Any] = {
+            "order": order_start,
+            "action": "request",
+            "method": endpoint.method,
+            "url": "/",
+            "params": params,
+        }
+        if body:
+            step["json"] = body
+        return [step]
+
+    def _default_api_params(self, path: str) -> dict[str, Any]:
+        return {
+            "application": "app",
+            "application_client_type": "weixin",
+            "ajax": "ajax",
+            "s": path,
+        }
+
+    def _prepared_request_body(self, endpoint: ApiEndpointSpec) -> dict[str, Any]:
+        body = dict(endpoint.request_example)
+        if "accounts" in body:
+            body["accounts"] = "${SHOPXO_USERNAME}"
+        if "username" in body:
+            body["username"] = "${SHOPXO_USERNAME}"
+        if "pwd" in body:
+            body["pwd"] = "${SHOPXO_PASSWORD}"
+        if "password" in body:
+            body["password"] = "${SHOPXO_PASSWORD}"
+        body.pop("verify", None)
+        return body
+
+    def _looks_like_shopxo_cart_requirement(self, content: str) -> bool:
+        return all(keyword in content for keyword in ["登录", "购物车"]) or all(
+            keyword in content for keyword in ["login", "cart"]
+        )
+
+    def _shopxo_login_cart_case(
+        self,
+        project_id: int,
+        requirement_id: int | None,
+        content: str = "",
+    ) -> TestCaseCreate:
+        common_params = {
+            "application": "app",
+            "application_client_type": "weixin",
+            "ajax": "ajax",
+        }
+        return TestCaseCreate(
+            project_id=project_id,
+            requirement_id=requirement_id,
+            title="验证华测商城登录后加入购物车",
+            type="api",
+            priority="P1",
+            status="draft",
+            preconditions="华测商城接口服务可访问，测试账号和商品规格数据已准备完成。",
+            steps=[
+                {
+                    "order": 1,
+                    "action": "request",
+                    "method": "POST",
+                    "url": "/",
+                    "params": {**common_params, "s": "api/user/login"},
+                    "json": {"accounts": "${SHOPXO_USERNAME}", "pwd": "${SHOPXO_PASSWORD}", "type": "username"},
+                },
+                {"order": 2, "action": "expect_status", "status": 200},
+                {"order": 3, "action": "expect_json_contains", "path": "code", "value": 0},
+                {"order": 4, "action": "extract_json", "path": "data.token", "as": "token"},
+                {
+                    "order": 5,
+                    "action": "request",
+                    "method": "POST",
+                    "url": "/",
+                    "params": {**common_params, "s": "api/cart/save", "token": "${token}"},
+                    "json": {
+                        "goods_id": "2",
+                        "spec": [
+                            {"type": "套餐", "value": "套餐二"},
+                            {"type": "颜色", "value": "银色"},
+                            {"type": "容量", "value": "64G"},
+                        ],
+                        "stock": 1,
+                    },
+                },
+                {"order": 6, "action": "expect_status", "status": 200},
+                {"order": 7, "action": "expect_json_contains", "path": "code", "value": 0},
+            ],
+            expected_result="登录接口返回 token，加入购物车接口返回 code=0。",
+            tags=["agent-generated", "api", "shopxo", "cart"],
+            generated_by="agent",
+            ai_review={},
+        )
+
     def _looks_like_web_ui_requirement(self, content: str) -> bool:
         return any(keyword in content for keyword in ["点击", "搜索框", "输入框", "按钮", "页面", "跳转", "填入", "搜索"])
 
     def _looks_like_api_requirement(self, content: str) -> bool:
         lowered = content.lower()
-        return any(keyword in lowered for keyword in ["api", "http", "接口", "请求", "响应", "状态码", "endpoint"])
+        return any(keyword in lowered for keyword in ["api", "http", "接口", "请求", "响应", "状态码", "endpoint", "登录", "购物车", "加购"])
+
+    def _extract_credentials(self, content: str) -> tuple[str, str]:
+        username = self._match_first(content, [r"账号[:：\s]*([A-Za-z0-9_@.-]{3,64})", r"用户名[:：\s]*([A-Za-z0-9_@.-]{3,64})"])
+        password = self._match_first(content, [r"密码[:：\s]*([^\s，。；;,]{3,64})"])
+        return username or "huace_xm", password or "123456"
+
+    def _match_first(self, content: str, patterns: list[str]) -> str | None:
+        for pattern in patterns:
+            match = re.search(pattern, content, flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
 
     def _extract_quoted_text(self, content: str) -> str | None:
         patterns = [
@@ -378,6 +720,12 @@ class TestCaseAgent:
             reviewed_cases.append(case.model_copy(update={"ai_review": review}))
         return reviewed_cases
 
+    def _review_cases_with_rules(self, requirement: str, cases: list[TestCaseCreate]) -> list[TestCaseCreate]:
+        return [
+            case.model_copy(update={"ai_review": self._rule_review_case(requirement, case, cases)})
+            for case in cases
+        ]
+
     def _review_with_deepseek(
         self,
         requirement: str,
@@ -432,7 +780,7 @@ class TestCaseAgent:
                     if isinstance(index, int):
                         result[index] = self._normalize_ai_review(item)
             return result
-        except (ValueError, TypeError, KeyError):
+        except Exception:
             return {}
 
     def _rule_review_case(

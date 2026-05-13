@@ -19,6 +19,8 @@ def get_deepseek_chat_model(temperature: float = 0.2, max_tokens: int | None = N
         "base_url": settings.deepseek_base_url,
         "model": settings.deepseek_model,
         "temperature": temperature,
+        "timeout": settings.llm_request_timeout_seconds,
+        "max_retries": 1,
     }
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens

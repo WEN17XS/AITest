@@ -300,6 +300,66 @@ backend/storage/runs/{run_id}/
 - 附件索引。
 - 后续失败归因 Agent 的占位字段。
 
+## Agent 自主执行闭环
+
+长期方向是让执行器不只是前端手动触发的任务执行模块，而是测试 Agent 可以调用的 Tool。
+
+目标链路：
+
+```text
+需求/代码变更/项目知识
+  -> 测试 Agent 规划测试范围
+  -> 选择或生成测试用例
+  -> 调用执行器 Tool
+  -> 读取结构化结果、日志、截图、trace、DOM 摘要
+  -> 失败归因 Agent
+  -> 人工审核归因和修复建议
+  -> 沉淀经验到知识库
+  -> 下一轮生成和执行时召回经验
+```
+
+执行器 Tool 的输入建议包含：
+
+- `project_id`
+- `environment_id`
+- `executor_type`
+- `case_ids` 或临时生成的结构化用例
+- `executor_config`
+- 可选的运行目标，例如本轮验证的功能、风险点或代码变更摘要
+
+执行器 Tool 的输出建议包含：
+
+- 标准运行状态和 summary
+- 单用例结果、失败步骤和错误摘要
+- 执行日志
+- 截图、trace、视频等附件索引
+- 页面诊断信息，例如当前 URL、标题、可见表单元素、关键 DOM 摘要
+- 初步错误分类，例如 `selector_not_visible`、`navigation_timeout`、`assertion_mismatch`、`environment_unreachable`、`anti_automation_blocked`
+
+失败归因 Agent 第一版不直接改用例，而是生成可审核建议：
+
+- selector 失效时建议候选 selector 或增加 `selector_candidates`
+- 页面加载超时时建议调整 `wait_until`、timeout 或断言等待策略
+- 断言失败时判断是产品行为变化、用例预期错误还是等待不足
+- 第三方公开站点触发安全验证时建议改用可控测试站点，或标记为外部站点兼容性风险
+- 环境不可达时建议检查 `base_url`、网络、服务启动和鉴权状态
+
+审核通过后的经验沉淀到知识库，建议使用以下 skill/类型：
+
+- `selector_strategy`：页面元素定位策略，例如可见元素优先、候选 selector、站点特定 selector。
+- `execution_failure`：执行失败原因和处理方式。
+- `site_compatibility`：第三方站点兼容性和反自动化限制。
+- `anti_pattern`：应避免的用例生成模式，例如只依赖过期或隐藏 selector。
+
+典型经验示例：
+
+```text
+站点：百度
+现象：`#kw` 存在但不可见，真实可见输入框可能是 `#chat-textarea`。
+处理：执行器应优先选择可见、可编辑元素；生成用例时加入 `selector_candidates`。
+风险：公开百度站点可能跳转到 `wappass.baidu.com` 安全验证页，不适合作为稳定 UI 自动化基准。
+```
+
 ## 数据库迁移建议
 
 第二阶段第一批迁移建议：

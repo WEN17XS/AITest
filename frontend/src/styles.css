@@ -208,8 +208,12 @@ h1 {
   border: 1px solid #b8d7ce;
   border-radius: 6px;
   color: #1f5d52;
+  font-family: inherit;
+  line-height: 1.55;
   margin-bottom: 14px;
   padding: 11px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .project-strip {
@@ -330,6 +334,18 @@ textarea:focus {
   width: 100%;
 }
 
+.ghost-button {
+  background: #ffffff;
+  border: 1px solid #cbd7da;
+  color: #203437;
+  justify-self: start;
+  padding: 8px 11px;
+}
+
+.requirement-doc-box {
+  margin-top: 12px;
+}
+
 .project-list,
 .case-list,
 .run-list,
@@ -425,6 +441,10 @@ textarea:focus {
   min-height: 360px;
 }
 
+.environment-variables {
+  min-height: 160px;
+}
+
 .actions {
   align-items: center;
   display: flex;
@@ -446,6 +466,62 @@ textarea:focus {
 .case-item,
 .run-item {
   padding: 14px;
+}
+
+.review-toolbar {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  margin-bottom: 12px;
+}
+
+.review-tabs {
+  background: #edf3f2;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 5px;
+}
+
+.review-tabs button {
+  align-items: center;
+  background: transparent;
+  color: #53656b;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+  min-height: 36px;
+  padding: 7px 8px;
+}
+
+.review-tabs button.active {
+  background: #ffffff;
+  color: #145f53;
+  font-weight: 900;
+}
+
+.review-tabs span {
+  background: #d7e5e3;
+  border-radius: 999px;
+  font-size: 12px;
+  min-width: 24px;
+  padding: 2px 6px;
+}
+
+.review-summary {
+  align-items: center;
+  color: #607177;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.review-summary strong {
+  color: #173b40;
+  font-size: 20px;
 }
 
 .case-item header,
@@ -602,7 +678,7 @@ textarea:focus {
   border-radius: 8px;
   display: grid;
   gap: 6px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   padding: 5px;
 }
 
@@ -647,6 +723,66 @@ textarea:focus {
 .run-config-summary strong {
   color: #173b40;
   font-size: 20px;
+}
+
+.run-case-picker {
+  border: 1px solid #dce5e6;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.run-case-picker-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.run-case-picker-header div {
+  display: flex;
+  gap: 8px;
+}
+
+.run-case-list {
+  display: grid;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.run-case-option {
+  align-items: start;
+  background: #f7fafb;
+  border: 1px solid #e1e9ea;
+  border-radius: 8px;
+  color: #263946;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  padding: 10px;
+}
+
+.run-case-option input {
+  margin-top: 3px;
+  width: auto;
+}
+
+.run-case-option span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.run-case-option strong {
+  overflow-wrap: anywhere;
+}
+
+.run-case-option small {
+  color: #607177;
+  font-size: 12px;
 }
 
 .run-item pre,
@@ -734,6 +870,73 @@ textarea:focus {
   padding: 4px 8px;
 }
 
+.artifact-url {
+  color: #355e75;
+  font-family: "JetBrains Mono", Consolas, monospace;
+}
+
+.artifact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.artifact-actions .ghost {
+  margin-left: 0;
+}
+
+.diagnosis-box {
+  background: #f3f6fb;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+  color: #263946;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 11px;
+}
+
+.diagnosis-box div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.diagnosis-box span,
+.diagnosis-box p,
+.diagnosis-box li {
+  color: #51606f;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.diagnosis-box ul,
+.diagnosis-box ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.diagnosis-box .diagnosis-repair {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  justify-content: stretch;
+}
+
+.diagnosis-repair pre {
+  background: #102027;
+  border-radius: 6px;
+  color: #d5ece5;
+  font-size: 12px;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .mini-item button {
   align-items: center;
   background: #edf1f2;
@@ -815,8 +1018,13 @@ textarea:focus {
   .metric-grid,
   .project-strip,
   .triple-row,
+  .review-toolbar,
   .executor-options,
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .review-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

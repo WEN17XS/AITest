@@ -118,6 +118,8 @@ class TestExecutionService:
             return "trace"
         if suffix in {".log", ".txt"}:
             return "log"
+        if suffix == ".json" and path.endswith("failure-evidence.json"):
+            return "evidence"
         return "artifact"
 
     def _guess_content_type(self, path: str) -> str | None:
@@ -132,6 +134,7 @@ class TestExecutionService:
             ".zip": "application/zip",
             ".log": "text/plain",
             ".txt": "text/plain",
+            ".json": "application/json",
         }.get(suffix)
 
     def _artifact_size(self, run_id: int, relative_path: str) -> int:

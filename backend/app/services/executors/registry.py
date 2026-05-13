@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from app.db.models import TestCase
 from app.services.executors.base import TestExecutor
+from app.services.executors.api_executor import ApiExecutor
+from app.services.executors.command_executor import CommandExecutor
 from app.services.executors.mock_executor import MockExecutor
 from app.services.executors.playwright_executor import PlaywrightExecutor
+from app.services.executors.pytest_executor import PytestExecutor
 
 
 class ExecutorRegistry:
@@ -40,11 +43,17 @@ class ExecutorRegistry:
 
 def create_default_registry() -> ExecutorRegistry:
     registry = ExecutorRegistry()
+    api_executor = ApiExecutor()
+    command_executor = CommandExecutor()
     mock_executor = MockExecutor()
     playwright_executor = PlaywrightExecutor()
+    pytest_executor = PytestExecutor()
     registry.register(
         mock_executor,
-        default_for={"manual", "api", "integration"},
+        default_for={"manual"},
     )
+    registry.register(api_executor, default_for={"api"})
     registry.register(playwright_executor, default_for={"web_ui"})
+    registry.register(pytest_executor, default_for={"pytest"})
+    registry.register(command_executor, default_for={"command", "integration"})
     return registry

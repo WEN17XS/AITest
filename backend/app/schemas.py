@@ -184,6 +184,7 @@ class RunResultOut(BaseModel):
     message: str | None
     logs: str | None
     artifacts: list[str]
+    ai_diagnosis: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(from_attributes=True)
 
